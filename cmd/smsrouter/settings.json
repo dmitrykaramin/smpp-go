@@ -1,0 +1,32 @@
+{
+  "DB_USERNAME": "docker_sms",
+  "DB_PASSWORD": "docker_sms",
+  "DB_NAME": "docker_sms",
+  "DB_HOST": "localhost",
+  "DB_PORT": "5432",
+
+  "RABBIT_USERNAME": "docker",
+  "RABBIT_PASSWORD": "docker",
+  "RABBIT_HOST": "localhost",
+  "RABBIT_LOGIN": "docker",
+  "RABBIT_VH": "rabbitmq",
+  "RABBIT_ROUTING_KEY": "sms",
+  "RABBIT_EXCHANGE": "sms",
+  "RABBIT_QUEUE": "sms_queue",
+  "RABBIT_PORT": "5672",
+
+
+  "SMS_ROUTER_IP": "localhost",
+  "SMS_ROUTER_PORT": "2775",
+  "SMS_ROUTER_SYSTEM_ID": "",
+  "SMS_ROUTER_PASSWORD": "",
+  "SMS_ROUTER_SOURCE_ADDR": "",
+
+  "SAVE_MESSAGES_IN_DB": true,
+
+  "FLUENT_TAG": "smsrouter",
+  "FLUENT_HOST": "127.0.0.1",
+  "FLUENT_PORT": 24224,
+
+  "SENTRY_DSN": ""
+}
