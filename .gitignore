@@ -16,3 +16,6 @@ vendor/
 
 # GaLand
 .idea
+
+# Settings
+settings.json

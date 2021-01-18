@@ -15,28 +15,38 @@ const (
 	DestAddrNPI   = 1
 )
 
-func NewTransceiver(f smpp.HandlerFunc) *smpp.Transceiver {
+func NewTransceiver(f smpp.HandlerFunc) (*smpp.Transceiver, error) {
+	configuration, err := internal.GetConfig()
+	if err != nil {
+		return nil, err
+	}
+
 	SMPPRouterAddress := fmt.Sprintf(
-		"%s:%s", internal.Configuration.SMS_ROUTER_IP, internal.Configuration.SMS_ROUTER_PORT,
+		"%s:%s", configuration.SMS_ROUTER_IP, configuration.SMS_ROUTER_PORT,
 	)
 	tx := &smpp.Transceiver{
 		Addr:    SMPPRouterAddress,
-		User:    internal.Configuration.SMS_ROUTER_SYSTEM_ID,
-		Passwd:  internal.Configuration.SMS_ROUTER_PASSWORD,
+		User:    configuration.SMS_ROUTER_SYSTEM_ID,
+		Passwd:  configuration.SMS_ROUTER_PASSWORD,
 		Handler: f,
 	}
-	smppConn := tx.Bind()
-	go func() {
-		for c := range smppConn {
-			fmt.Printf("SMPP connection status: %s", c.Status())
-		}
-	}()
-	return tx
+	//smppConn := tx.Bind()
+	//go func() {
+	//	for c := range smppConn {
+	//		fmt.Printf("SMPP connection status: %s", c.Status())
+	//	}
+	//}()
+	return tx, nil
 }
 
-func NewShortMessage(phone, message string) *smpp.ShortMessage {
+func NewShortMessage(phone, message string) (*smpp.ShortMessage, error) {
+	configuration, err := internal.GetConfig()
+	if err != nil {
+		return nil, err
+	}
+
 	return &smpp.ShortMessage{
-		Src:           internal.Configuration.SMS_ROUTER_SOURCE_ADDR,
+		Src:           configuration.SMS_ROUTER_SOURCE_ADDR,
 		Dst:           phone,
 		Text:          pdutext.UCS2(message),
 		Register:      pdufield.FinalDeliveryReceipt,
@@ -44,5 +54,5 @@ func NewShortMessage(phone, message string) *smpp.ShortMessage {
 		SourceAddrNPI: uint8(SourceAddrNPI),
 		DestAddrTON:   uint8(DestAddrTON),
 		DestAddrNPI:   uint8(DestAddrNPI),
-	}
+	}, err
 }

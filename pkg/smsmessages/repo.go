@@ -3,25 +3,28 @@ package smsmessages
 import (
 	"SMSRouter/internal"
 	"SMSRouter/pkg/bus"
+	"SMSRouter/pkg/db"
 	"SMSRouter/pkg/logger"
 	"SMSRouter/pkg/router"
+	"context"
 	"encoding/json"
-	"fmt"
 	"github.com/fiorix/go-smpp/smpp"
+	"github.com/fiorix/go-smpp/smpp/pdu"
+	"github.com/fiorix/go-smpp/smpp/pdu/pdutlv"
 	"github.com/fluent/fluent-logger-golang/fluent"
 	"github.com/getsentry/sentry-go"
 	"github.com/jmoiron/sqlx"
 	"github.com/streadway/amqp"
 	"log"
 	"net/http"
-	"regexp"
 	"time"
 )
 
 type SMSMessage struct {
 	MessageID       string      `db:"message_id" `
 	MessageSequence int         `db:"message_sequence"`
-	Phone           json.Number `db:"phone" json:"phone"`
+	Phone           json.Number `json:"phone"`
+	PhoneString     string      `db:"phone"`
 	Message         string      `db:"message"`
 	IsSent          bool        `db:"is_sent"`
 	IsDelivered     bool        `db:"date_created"`
@@ -35,11 +38,17 @@ type SmsRepo struct {
 	RabbitMes     <-chan amqp.Delivery
 	RabbitConn    *amqp.Connection
 	RabbitChannel *amqp.Channel
+	Context       context.Context
+	CancelFunc    context.CancelFunc
 }
 
-type SMSMessanger interface {
+type SMSMessenger interface {
 	SaveInDB(message SMSMessage)
-	SendBySMPP(phone, message string)
+	SendBySMPP(message SMSMessage) error
+	SetDelivered(messageID string)
+	LogMessage(message SMSMessage) error
+	NewRabbitChannel() *amqp.Channel
+	NewFluentConn() *fluent.Fluent
 }
 
 func NewSMSMessage() SMSMessage {
@@ -50,6 +59,28 @@ func NewSMSMessage() SMSMessage {
 	}
 }
 
+func NewSmsRepo() SmsRepo {
+	return SmsRepo{}
+}
+
+func (m *SmsRepo) LogMessage(message SMSMessage) error {
+	configuration, err := internal.GetConfig()
+
+	if err != nil {
+		return err
+	}
+
+	logger.MessageMap["phone"] = message.PhoneString
+	logger.MessageMap["message"] = message.Message
+
+	err = m.FluentConn.Post(configuration.FLUENT_TAG, logger.MessageMap)
+	if err != nil {
+		sentry.CaptureException(err)
+	}
+
+	return nil
+}
+
 func (m *SmsRepo) SaveInDB(message SMSMessage) {
 	if m.DBConn == nil {
 		return
@@ -58,7 +89,7 @@ func (m *SmsRepo) SaveInDB(message SMSMessage) {
 	_, err := m.DBConn.Exec(
 		"INSERT INTO sms_sms (phone, message, message_id, date_created, is_sent, is_delivered) "+
 			"VALUES ($1, $2, $3, $4, $5, $6)",
-		string(message.Phone), message.Message, message.MessageID, message.DateCreated, message.IsSent,
+		message.PhoneString, message.Message, message.MessageID, message.DateCreated, message.IsSent,
 		message.IsDelivered,
 	)
 
@@ -79,62 +110,24 @@ func (m *SmsRepo) SetDelivered(messageID string) {
 	}
 }
 
-func (m *SmsRepo) SendBySMPP(phone, message string) (*smpp.ShortMessage, error) {
-	sm, err := m.SMPPTx.Submit(router.NewShortMessage(phone, message))
+func (m *SmsRepo) SendBySMPP(message SMSMessage) error {
+	m.LogMessage(message)
+	shortMessage, err := router.NewShortMessage(message.PhoneString, message.Message)
+	if err != nil {
+		return err
+	}
+	sm, err := m.SMPPTx.Submit(shortMessage)
 
 	if err != nil {
-		sentry.CaptureException(err)
-		return nil, err
+		return err
 	}
 
-	logger.MessageMap["phone"] = phone
-	logger.MessageMap["message"] = message
+	message.MessageID = sm.RespID()
+	m.SaveInDB(message)
 
-	return sm, nil
-}
+	log.Printf("Received a message: %s", sm.RespID())
 
-func (m *SmsRepo) StartService() {
-	var phoneRegex = regexp.MustCompile(`^7\d{10}$`)
-	MessageTemplate := NewSMSMessage()
-	messages, err := bus.InitMessages(m.RabbitChannel)
-
-	if err != nil {
-		sentry.CaptureException(err)
-		return
-	}
-
-	for message := range messages {
-		err := json.Unmarshal(message.Body, &MessageTemplate)
-		if err != nil {
-			sentry.CaptureException(err)
-			continue
-		}
-
-		phoneString := string(MessageTemplate.Phone)
-
-		if !phoneRegex.MatchString(phoneString) {
-			sentry.CaptureException(fmt.Errorf(
-				fmt.Sprintf("wrong phone format: %s", MessageTemplate.Phone),
-			))
-			continue
-		}
-
-		logger.MessageMap["phone"] = phoneString
-		logger.MessageMap["message"] = MessageTemplate.Message
-		m.FluentConn.Post(internal.Configuration.FLUENT_TAG, logger.MessageMap)
-
-		sm, err := m.SendBySMPP(phoneString, MessageTemplate.Message)
-
-		if err != nil {
-			sentry.CaptureException(err)
-			continue
-		}
-
-		MessageTemplate.MessageID = sm.RespID()
-		m.SaveInDB(MessageTemplate)
-
-		log.Printf("Received a message: %s", sm.RespID())
-	}
+	return nil
 }
 
 func (m *SmsRepo) HealthCheck(w http.ResponseWriter, req *http.Request) {
@@ -144,4 +137,59 @@ func (m *SmsRepo) HealthCheck(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	conn.Close()
+}
+
+func (m *SmsRepo) StartInfrastructure() error {
+	configuration, err := internal.GetConfig()
+
+	if err != nil {
+		return err
+	}
+
+	PDUHandlerFunc := func(repo *SmsRepo) func(pdu.Body) {
+		return func(p pdu.Body) {
+			if p.Header().ID == pdu.DeliverSMID && configuration.SAVE_MESSAGES_IN_DB {
+				repo.SetDelivered(p.TLVFields()[pdutlv.TagReceiptedMessageID].String())
+			}
+		}
+	}(m)
+
+	// Init database if needed
+	if configuration.SAVE_MESSAGES_IN_DB {
+		dbConn, err := db.NewDBConn()
+		if err != nil {
+			return err
+		}
+		m.DBConn = dbConn
+	}
+
+	// Init RabbitMQ
+	amqpConn, err := bus.InitAMQP()
+	if err != nil {
+		return err
+	}
+	m.RabbitConn = amqpConn
+
+	ch, err := bus.NewAMQPChannel(amqpConn)
+	if err != nil {
+		return err
+	}
+	m.RabbitChannel = ch
+
+	// Init SMPP
+	transceiver, err := router.NewTransceiver(PDUHandlerFunc)
+	if err != nil {
+		return err
+	}
+	m.SMPPTx = transceiver
+
+	return nil
+}
+
+func (m *SmsRepo) NewRabbitChannel() *amqp.Channel {
+	return m.RabbitChannel
+}
+
+func (m *SmsRepo) NewFluentConn() *fluent.Fluent {
+	return m.FluentConn
 }

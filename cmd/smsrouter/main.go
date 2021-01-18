@@ -1,120 +1,191 @@
 package main
 
 import (
-	"SMSRouter/internal"
 	"SMSRouter/pkg/bus"
-	"SMSRouter/pkg/db"
 	"SMSRouter/pkg/logger"
-	"SMSRouter/pkg/router"
 	"SMSRouter/pkg/smsmessages"
-	"github.com/fiorix/go-smpp/smpp/pdu"
-	"github.com/fiorix/go-smpp/smpp/pdu/pdutlv"
+	"context"
+	"encoding/json"
+	"fmt"
 	"github.com/getsentry/sentry-go"
+	"golang.org/x/sync/errgroup"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"regexp"
+	"syscall"
+	"time"
 )
 
-func StartLoggers(smsrepo *smsmessages.SmsRepo) error {
-	// Init Sentry
-	err := sentry.Init(sentry.ClientOptions{Dsn: internal.Configuration.SENTRY_DSN, Debug: true})
+const (
+	FlushSentrySec = 4
+)
 
-	if err != nil {
-		return err
-	}
+func StartHTTPServer(ctx context.Context, g *errgroup.Group, done context.CancelFunc, smsRepo *smsmessages.SmsRepo) {
+	HTTPServer := &http.Server{Addr: ":8080"}
+	g.Go(func() error {
+		http.HandleFunc("/health", smsRepo.HealthCheck)
+		err := HTTPServer.ListenAndServe()
 
-	// Init Fluent
-	fluentConn, err := logger.InitFluent()
-	if err != nil {
-		return err
-	}
+		fmt.Println(err)
 
-	smsrepo.FluentConn = fluentConn
-
-	return nil
-}
-
-func StartInfrastructure(smsrepo *smsmessages.SmsRepo) error {
-	PDUHandlerFunc := func(repo *smsmessages.SmsRepo) func(pdu.Body) {
-		return func(p pdu.Body) {
-			if p.Header().ID == pdu.DeliverSMID && internal.Configuration.SAVE_MESSAGES_IN_DB {
-				repo.SetDelivered(p.TLVFields()[pdutlv.TagReceiptedMessageID].String())
-			}
-		}
-	}(smsrepo)
-
-	// Init database if needed
-	if internal.Configuration.SAVE_MESSAGES_IN_DB {
-		dbConn, err := db.InitDB()
 		if err != nil {
+			fmt.Println("HTTP SERVER CLOSING")
+			sentry.CaptureException(err)
+			done()
 			return err
 		}
-		smsrepo.DBConn = dbConn
-	}
+		return nil
+	})
 
-	// Init RabbitMQ
-	amqpConn, err := bus.InitAMQP()
-	if err != nil {
-		return err
-	}
-	smsrepo.RabbitConn = amqpConn
-
-	ch, err := bus.InitAMQPChannel(amqpConn)
-
-	if err != nil {
-		return err
-	}
-	smsrepo.RabbitChannel = ch
-
-	// Init SMPP
-	transceiver := router.NewTransceiver(PDUHandlerFunc)
-	smsrepo.SMPPTx = transceiver
-
-	return nil
-}
-
-func StartHTTPServer(smsrepo *smsmessages.SmsRepo) error {
-	http.HandleFunc("/health", smsrepo.HealthCheck)
-	return http.ListenAndServe(":8080", nil)
+	<-ctx.Done()
+	_ = HTTPServer.Shutdown(ctx)
+	fmt.Println("HTTP SERVER STOPPED")
 }
 
 func CloseConnections(smsrepo *smsmessages.SmsRepo) {
+	var err error
+
 	// Close all connections
-	smsrepo.FluentConn.Close()
-	smsrepo.RabbitConn.Close()
-	smsrepo.RabbitChannel.Close()
-	smsrepo.SMPPTx.Close()
+	err = smsrepo.FluentConn.Close()
+	if err != nil {
+		sentry.CaptureException(err)
+	}
+
+	err = smsrepo.RabbitConn.Close()
+	if err != nil {
+		sentry.CaptureException(err)
+	}
+
+	err = smsrepo.RabbitChannel.Close()
+	if err != nil {
+		sentry.CaptureException(err)
+	}
+
+	err = smsrepo.SMPPTx.Close()
+	if err != nil {
+		sentry.CaptureException(err)
+	}
+
 	if smsrepo.DBConn != nil {
-		smsrepo.DBConn.Close()
+		err = smsrepo.DBConn.Close()
+		if err != nil {
+			sentry.CaptureException(err)
+		}
+	}
+}
+
+func StartService(ctx context.Context, smsRepo smsmessages.SMSMessenger) func() error {
+	return func() error {
+		var phoneRegex = regexp.MustCompile(`^7\d{10}$`)
+
+		Message := smsmessages.NewSMSMessage()
+		messages, err := bus.InitMessages(smsRepo.NewRabbitChannel())
+		if err != nil {
+			sentry.CaptureException(err)
+			sentry.Flush(time.Second * 5)
+			return err
+		}
+
+		fmt.Println("Started Server")
+
+		go func() {
+			for message := range messages {
+				fmt.Printf("MESSAGE RECEIVED %v \n", message)
+				sentry.CaptureMessage(fmt.Sprintf("MESSAGE RECEIVED %v \n", message))
+
+				err := json.Unmarshal(message.Body, &Message)
+				if err != nil {
+					sentry.CaptureException(err)
+					continue
+				}
+
+				Message.PhoneString = string(Message.Phone)
+
+				sentry.CaptureMessage(fmt.Sprintf("MESSAGE RECEIVED %v, %v", Message.PhoneString, Message.Message))
+
+				if !phoneRegex.MatchString(Message.PhoneString) {
+					sentry.CaptureException(fmt.Errorf(
+						fmt.Sprintf("wrong phone format: %s", Message.Phone),
+					))
+					continue
+				}
+			}
+		}()
+
+		//err = smsRepo.SendBySMPP(Message)
+		//if err != nil {
+		//	sentry.CaptureException(err)
+		//	continue
+		//}
+
+		<-ctx.Done()
+		fmt.Println("Finish Server")
+		return nil
+	}
+}
+
+func ManualCancel(ctx context.Context, cancelFunc context.CancelFunc) func() error {
+	return func() error {
+		signalChannel := make(chan os.Signal, 1)
+		signal.Notify(signalChannel, os.Interrupt, syscall.SIGTERM)
+
+		select {
+		case sig := <-signalChannel:
+			fmt.Printf("Received signal: %s\n", sig)
+			cancelFunc()
+		case <-ctx.Done():
+			fmt.Printf("closing ManualCancel goroutine\n")
+			return ctx.Err()
+		}
+		return nil
 	}
 }
 
 func main() {
 	var err error
-	SmsRepo := smsmessages.SmsRepo{}
 
-	err = internal.SetConfig("settings.json")
+	ctx, done := context.WithCancel(context.Background())
+	g, gctx := errgroup.WithContext(ctx)
+
+	SmsRepo := smsmessages.NewSmsRepo()
+
 	if err != nil {
-		log.Fatalf("error configuring project: %s", err)
+		log.Fatalf("[Config] error: %s", err)
 	}
 
-	err = StartLoggers(&SmsRepo)
+	err = logger.StartSentry()
 	if err != nil {
-		sentry.CaptureException(err)
-		log.Fatalf("logging start up error: %s", err)
+		log.Fatalf("[Sentry] error: %s", err)
 	}
 
-	err = StartInfrastructure(&SmsRepo)
+	FluentConn, err := logger.StartFluent()
 	if err != nil {
 		sentry.CaptureException(err)
-		log.Fatalf("infrastructure start up error: %s", err)
+		log.Fatalf("[Fluent] error: %s", err)
+	}
+	SmsRepo.FluentConn = FluentConn
+
+	err = SmsRepo.StartInfrastructure()
+	if err != nil {
+		sentry.CaptureException(err)
+		log.Fatalf("[Infrastructure] error: %s", err)
 	}
 
 	defer CloseConnections(&SmsRepo)
+	defer sentry.Flush(FlushSentrySec * time.Second)
 
-	go SmsRepo.StartService()
+	go StartHTTPServer(ctx, g, done, &SmsRepo)
+	g.Go(ManualCancel(gctx, done))
+	g.Go(StartService(gctx, &SmsRepo))
 
-	err = StartHTTPServer(&SmsRepo)
+	fmt.Println("All started")
+
+	err = g.Wait()
 	if err != nil {
-		sentry.CaptureException(err)
+		fmt.Printf("Service stopped, reason: %v", err)
 	}
+
+	fmt.Println("Service stopped")
 }

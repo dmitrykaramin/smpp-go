@@ -14,6 +14,7 @@ require (
 	github.com/streadway/amqp v1.0.0
 	github.com/tinylib/msgp v1.1.2 // indirect
 	github.com/tkanos/gonfig v0.0.0-20181112185242-896f3d81fadf
+	golang.org/x/sync v0.0.0-20201020160332-67f06af15bc9
 	golang.org/x/text v0.3.4 // indirect
 	gopkg.in/yaml.v2 v2.3.0 // indirect
 )

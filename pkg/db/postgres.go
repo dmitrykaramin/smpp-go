@@ -26,13 +26,18 @@ CREATE TABLE IF NOT EXISTS sms_sms (
     date_created     timestamp with time zone not null
 );`
 
-func InitDB() (*sqlx.DB, error) {
+func NewDBConn() (*sqlx.DB, error) {
+	configuration, err := internal.GetConfig()
+	if err != nil {
+		return nil, err
+	}
+
 	DBDsn := fmt.Sprintf("host=%s port=%s user=%s dbname=%s password=%s sslmode=disable",
-		internal.Configuration.DB_HOST,
-		internal.Configuration.DB_PORT,
-		internal.Configuration.DB_USERNAME,
-		internal.Configuration.DB_NAME,
-		internal.Configuration.DB_PASSWORD,
+		configuration.DB_HOST,
+		configuration.DB_PORT,
+		configuration.DB_USERNAME,
+		configuration.DB_NAME,
+		configuration.DB_PASSWORD,
 	)
 	db, err := sqlx.Connect("postgres", DBDsn)
 	if err != nil {

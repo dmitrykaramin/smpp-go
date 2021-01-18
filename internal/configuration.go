@@ -6,7 +6,11 @@ import (
 	"github.com/tkanos/gonfig"
 )
 
-type configuration struct {
+const (
+	SettingsFilePath = "cmd/smsrouter/settings.json"
+)
+
+type Configuration struct {
 	RABBIT_LOGIN       string
 	RABBIT_PASSWORD    string
 	RABBIT_VH          string
@@ -37,16 +41,12 @@ type configuration struct {
 	SENTRY_DSN string
 }
 
-var Configuration configuration
-
-func SetConfig(filepath string) error {
-	configuration := configuration{}
-	err := gonfig.GetConf(filepath, &configuration)
+func GetConfig() (Configuration, error) {
+	configuration := Configuration{}
+	err := gonfig.GetConf(SettingsFilePath, &configuration)
 	if err != nil {
 		sentry.CaptureException(fmt.Errorf("project is not configured: %s", err))
-		return err
+		return configuration, err
 	}
-	Configuration = configuration
-
-	return nil
+	return configuration, nil
 }

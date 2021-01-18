@@ -7,52 +7,64 @@ import (
 )
 
 func InitAMQP() (*amqp.Connection, error) {
+	configuration, err := internal.GetConfig()
+
+	if err != nil {
+		return nil, err
+	}
+
 	RabbitDSN := fmt.Sprintf(
 		"amqp://%s:%s@%s:%s/%s",
-		internal.Configuration.RABBIT_LOGIN,
-		internal.Configuration.RABBIT_PASSWORD,
-		internal.Configuration.RABBIT_HOST,
-		internal.Configuration.RABBIT_PORT,
-		internal.Configuration.RABBIT_VH,
+		configuration.RABBIT_LOGIN,
+		configuration.RABBIT_PASSWORD,
+		configuration.RABBIT_HOST,
+		configuration.RABBIT_PORT,
+		configuration.RABBIT_VH,
 	)
 
 	return amqp.Dial(RabbitDSN)
 }
 
-func InitAMQPChannel(conn *amqp.Connection) (*amqp.Channel, error) {
+func NewAMQPChannel(conn *amqp.Connection) (*amqp.Channel, error) {
 	return conn.Channel()
 }
 
 func InitMessages(ch *amqp.Channel) (<-chan amqp.Delivery, error) {
-	err := ch.ExchangeDeclare(
-		internal.Configuration.RABBIT_EXCHANGE, // name
-		"direct",                               // type
-		true,                                   // durable
-		false,                                  // auto-deleted
-		false,                                  // internal
-		false,                                  // no-wait
-		nil,                                    // arguments
+	configuration, err := internal.GetConfig()
+
+	if err != nil {
+		return nil, err
+	}
+
+	err = ch.ExchangeDeclare(
+		configuration.RABBIT_EXCHANGE, // name
+		"direct",                      // type
+		true,                          // durable
+		false,                         // auto-deleted
+		false,                         // internal
+		false,                         // no-wait
+		nil,                           // arguments
 	)
 	if err != nil {
 		return nil, err
 	}
 
 	q, err := ch.QueueDeclare(
-		internal.Configuration.RABBIT_QUEUE, // name
-		true,                                // durable
-		false,                               // delete when unused
-		false,                               // exclusive
-		false,                               // no-wait
-		nil,                                 // arguments
+		configuration.RABBIT_QUEUE, // name
+		true,                       // durable
+		false,                      // delete when unused
+		false,                      // exclusive
+		false,                      // no-wait
+		nil,                        // arguments
 	)
 	if err != nil {
 		return nil, err
 	}
 
 	err = ch.QueueBind(
-		q.Name, // queue name
-		internal.Configuration.RABBIT_ROUTING_KEY, // routing key
-		internal.Configuration.RABBIT_EXCHANGE,    // exchange
+		q.Name,                           // queue name
+		configuration.RABBIT_ROUTING_KEY, // routing key
+		configuration.RABBIT_EXCHANGE,    // exchange
 		false,
 		nil,
 	)

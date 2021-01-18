@@ -10,7 +10,7 @@
   "RABBIT_HOST": "localhost",
   "RABBIT_LOGIN": "docker",
   "RABBIT_VH": "rabbitmq",
-  "RABBIT_ROUTING_KEY": "sms",
+  "RABBIT_ROUTING_KEY": "ggfn",
   "RABBIT_EXCHANGE": "sms",
   "RABBIT_QUEUE": "sms_queue",
   "RABBIT_PORT": "5672",
@@ -18,9 +18,9 @@
 
   "SMS_ROUTER_IP": "localhost",
   "SMS_ROUTER_PORT": "2775",
-  "SMS_ROUTER_SYSTEM_ID": "",
-  "SMS_ROUTER_PASSWORD": "",
-  "SMS_ROUTER_SOURCE_ADDR": "",
+  "SMS_ROUTER_SYSTEM_ID": "Beeline_Gaming",
+  "SMS_ROUTER_PASSWORD": "JoEZFN",
+  "SMS_ROUTER_SOURCE_ADDR": "BeeGaming",
 
   "SAVE_MESSAGES_IN_DB": true,
 
@@ -28,5 +28,5 @@
   "FLUENT_HOST": "127.0.0.1",
   "FLUENT_PORT": 24224,
 
-  "SENTRY_DSN": ""
+  "SENTRY_DSN": "http://6730c979a43b4f1cb4ac47ffb85fc4d0@sentry.kube.vimpelcom.ru/15"
 }
