@@ -30,12 +30,12 @@ func NewTransceiver(f smpp.HandlerFunc) (*smpp.Transceiver, error) {
 		Passwd:  configuration.SMS_ROUTER_PASSWORD,
 		Handler: f,
 	}
-	//smppConn := tx.Bind()
-	//go func() {
-	//	for c := range smppConn {
-	//		fmt.Printf("SMPP connection status: %s", c.Status())
-	//	}
-	//}()
+	smppConn := tx.Bind()
+	go func() {
+		for c := range smppConn {
+			fmt.Printf("SMPP connection status: %s \n", c.Status())
+		}
+	}()
 	return tx, nil
 }
 

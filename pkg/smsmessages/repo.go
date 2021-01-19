@@ -13,6 +13,7 @@ import (
 	"github.com/fiorix/go-smpp/smpp/pdu/pdutlv"
 	"github.com/fluent/fluent-logger-golang/fluent"
 	"github.com/getsentry/sentry-go"
+	"github.com/isayme/go-amqp-reconnect/rabbitmq"
 	"github.com/jmoiron/sqlx"
 	"github.com/streadway/amqp"
 	"log"
@@ -36,8 +37,8 @@ type SmsRepo struct {
 	SMPPTx        *smpp.Transceiver
 	FluentConn    *fluent.Fluent
 	RabbitMes     <-chan amqp.Delivery
-	RabbitConn    *amqp.Connection
-	RabbitChannel *amqp.Channel
+	RabbitConn    *rabbitmq.Connection
+	RabbitChannel *rabbitmq.Channel
 	Context       context.Context
 	CancelFunc    context.CancelFunc
 }
@@ -47,8 +48,8 @@ type SMSMessenger interface {
 	SendBySMPP(message SMSMessage) error
 	SetDelivered(messageID string)
 	LogMessage(message SMSMessage) error
-	NewRabbitChannel() *amqp.Channel
-	NewFluentConn() *fluent.Fluent
+	GetRabbitChannel() *rabbitmq.Channel
+	GetFluentConn() *fluent.Fluent
 }
 
 func NewSMSMessage() SMSMessage {
@@ -186,10 +187,10 @@ func (m *SmsRepo) StartInfrastructure() error {
 	return nil
 }
 
-func (m *SmsRepo) NewRabbitChannel() *amqp.Channel {
+func (m *SmsRepo) GetRabbitChannel() *rabbitmq.Channel {
 	return m.RabbitChannel
 }
 
-func (m *SmsRepo) NewFluentConn() *fluent.Fluent {
+func (m *SmsRepo) GetFluentConn() *fluent.Fluent {
 	return m.FluentConn
 }

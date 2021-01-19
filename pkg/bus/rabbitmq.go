@@ -3,10 +3,11 @@ package bus
 import (
 	"SMSRouter/internal"
 	"fmt"
+	"github.com/isayme/go-amqp-reconnect/rabbitmq"
 	"github.com/streadway/amqp"
 )
 
-func InitAMQP() (*amqp.Connection, error) {
+func InitAMQP() (*rabbitmq.Connection, error) {
 	configuration, err := internal.GetConfig()
 
 	if err != nil {
@@ -22,14 +23,14 @@ func InitAMQP() (*amqp.Connection, error) {
 		configuration.RABBIT_VH,
 	)
 
-	return amqp.Dial(RabbitDSN)
+	return rabbitmq.Dial(RabbitDSN)
 }
 
-func NewAMQPChannel(conn *amqp.Connection) (*amqp.Channel, error) {
+func NewAMQPChannel(conn *rabbitmq.Connection) (*rabbitmq.Channel, error) {
 	return conn.Channel()
 }
 
-func InitMessages(ch *amqp.Channel) (<-chan amqp.Delivery, error) {
+func InitMessages(ch *rabbitmq.Channel) (<-chan amqp.Delivery, error) {
 	configuration, err := internal.GetConfig()
 
 	if err != nil {

@@ -82,7 +82,7 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 10.10.0.0/16
+        - subnet: 10.9.0.0/16
 
 volumes:
   sms_postgres_go:

@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	FlushSentrySec = 4
+	FlushSentrySec = 5
 )
 
 func StartHTTPServer(ctx context.Context, g *errgroup.Group, done context.CancelFunc, smsRepo *smsmessages.SmsRepo) {
@@ -81,10 +81,10 @@ func StartService(ctx context.Context, smsRepo smsmessages.SMSMessenger) func() 
 		var phoneRegex = regexp.MustCompile(`^7\d{10}$`)
 
 		Message := smsmessages.NewSMSMessage()
-		messages, err := bus.InitMessages(smsRepo.NewRabbitChannel())
+		messages, err := bus.InitMessages(smsRepo.GetRabbitChannel())
 		if err != nil {
 			sentry.CaptureException(err)
-			sentry.Flush(time.Second * 5)
+			sentry.Flush(FlushSentrySec * time.Second)
 			return err
 		}
 
@@ -92,9 +92,6 @@ func StartService(ctx context.Context, smsRepo smsmessages.SMSMessenger) func() 
 
 		go func() {
 			for message := range messages {
-				fmt.Printf("MESSAGE RECEIVED %v \n", message)
-				sentry.CaptureMessage(fmt.Sprintf("MESSAGE RECEIVED %v \n", message))
-
 				err := json.Unmarshal(message.Body, &Message)
 				if err != nil {
 					sentry.CaptureException(err)
@@ -102,26 +99,22 @@ func StartService(ctx context.Context, smsRepo smsmessages.SMSMessenger) func() 
 				}
 
 				Message.PhoneString = string(Message.Phone)
-
-				sentry.CaptureMessage(fmt.Sprintf("MESSAGE RECEIVED %v, %v", Message.PhoneString, Message.Message))
-
 				if !phoneRegex.MatchString(Message.PhoneString) {
 					sentry.CaptureException(fmt.Errorf(
 						fmt.Sprintf("wrong phone format: %s", Message.Phone),
 					))
 					continue
 				}
+
+				err = smsRepo.SendBySMPP(Message)
+				if err != nil {
+					sentry.CaptureException(err)
+					continue
+				}
 			}
 		}()
 
-		//err = smsRepo.SendBySMPP(Message)
-		//if err != nil {
-		//	sentry.CaptureException(err)
-		//	continue
-		//}
-
 		<-ctx.Done()
-		fmt.Println("Finish Server")
 		return nil
 	}
 }
@@ -150,10 +143,6 @@ func main() {
 	g, gctx := errgroup.WithContext(ctx)
 
 	SmsRepo := smsmessages.NewSmsRepo()
-
-	if err != nil {
-		log.Fatalf("[Config] error: %s", err)
-	}
 
 	err = logger.StartSentry()
 	if err != nil {
