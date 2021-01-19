@@ -18,4 +18,4 @@ vendor/
 .idea
 
 # Settings
-settings.json
+cmd/smsrouter/settings.json
