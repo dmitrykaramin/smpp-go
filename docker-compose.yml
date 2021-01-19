@@ -1,0 +1,90 @@
+version: "3.7"
+
+services:
+#  web:
+#    build:
+#      context: .
+#    #    command: gunicorn --workers=2 --bind=0.0.0.0:8000 smsrouter.wsgi:application
+#    #    command: uvicorn --workers=2 --host=0.0.0.0 --port=8000 smsrouter.asgi:application
+#    command: ./manage.py runserver 0.0.0.0:8000
+#    restart: "no"
+#    depends_on:
+#      - postgres
+#    volumes:
+#      - ./src:/app
+#    env_file:
+#      - docker/env/postgres.dev.env
+#      - docker/env/web.dev.env
+#    ports:
+#      - 8000:8000
+#    networks:
+#      - sms_net
+
+  postgres:
+    image: postgres:11-alpine
+    restart: "no"
+    volumes:
+      - sms_postgres_go:/var/lib/postgresql/data
+    env_file:
+      - docker/env/postgres.dev.env
+    ports:
+      - 5432:5432
+    networks:
+      - sms_net
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    restart: "no"
+    volumes:
+      - sms_rabbit_go:/var/lib/rabbitmq
+    env_file:
+      - docker/env/rabbitmq.dev.env
+    ports:
+      - 5672:5672
+      - 15672:15672
+    networks:
+      - sms_net
+
+  fluentd:
+    build: docker/fluentd
+    volumes:
+      - ./docker/fluentd/conf:/fluentd/etc
+    links:
+      - "elasticsearch"
+    ports:
+      - "24224:24224"
+      - "24224:24224/udp"
+    networks:
+      - sms_net
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.2.0
+    environment:
+      - "discovery.type=single-node"
+    expose:
+      - "9200"
+    ports:
+      - "9200:9200"
+    networks:
+      - sms_net
+
+  kibana:
+    image: kibana:7.2.0
+    links:
+      - "elasticsearch"
+    ports:
+      - "5601:5601"
+    networks:
+      - sms_net
+
+networks:
+  sms_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.9.0.0/16
+
+volumes:
+  sms_postgres_go:
+  sms_volume_go:
+  sms_rabbit_go:
